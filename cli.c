@@ -78,7 +78,7 @@ recv_stream_data_cb (ngtcp2_conn *conn, uint32_t flags, int64_t stream_id,
                      uint64_t offset, const uint8_t *data, size_t datalen,
                      void *user_data, void *stream_user_data)
 {
-  g_debug ("receiving from stream #%zd", stream_id);
+  g_debug ("receiving %zu bytes from stream #%zd", datalen, stream_id);
   write (STDOUT_FILENO, data, datalen);
   return 0;
 }
@@ -163,6 +163,8 @@ handle_stdin (Client *client)
         g_steal_pointer (&stream);
       connection_add_stream (client->connection,
                              client->streams[client->stream_index]);
+
+      g_debug ("opened stream #%zd", stream_id);
     }
 
   if (client->streams[client->stream_index])
@@ -171,6 +173,8 @@ handle_stdin (Client *client)
                               buf, nread);
       if (ret < 0)
         return -1;
+
+      g_debug ("buffered %zd bytes", nread);
 
       if (++client->coalesce_count < client->n_coalescing)
         return 0;
