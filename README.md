@@ -46,10 +46,8 @@ SSLKEYLOGFILE=$PWD/keylog.txt _build/cli localhost 5556 credentials/ca.pem
 2. Use wireshark or tshark to capture the traffic:
 
 ```console
-tshark -o "tls.desegment_ssl_records: TRUE" \
-	   -o "tls.desegment_ssl_application_data: TRUE" \
-	   -o "tls.keylog_file: $PWD/keylog.txt" \
-	   -i lo -Px -O quic -Y "udp.port == 5556"
+tshark -o "tls.keylog_file: $PWD/keylog.txt" \
+       -i lo -Px -O quic -Y "udp.port == 5556"
 ```
 
 ## TODO
