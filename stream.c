@@ -55,9 +55,8 @@ stream_peek_data (Stream *stream, size_t *data_size)
 {
   size_t start_offset = stream->sent_offset - stream->acked_offset;
   size_t offset = 0;
-  GList *l = g_queue_peek_head_link (stream->buffer);
 
-  for (; l; l = l->next)
+  for (GList *l = g_queue_peek_head_link (stream->buffer); l; l = l->next)
     {
       GBytes *bytes = (GBytes *)l->data;
       gsize bytes_size;

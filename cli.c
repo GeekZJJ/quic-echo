@@ -44,7 +44,11 @@ client_deinit (Client *client)
 static void
 rand_cb (uint8_t *dest, size_t destlen, const ngtcp2_rand_ctx *rand_ctx)
 {
-  (void)gnutls_rnd (GNUTLS_RND_RANDOM, dest, destlen);
+  int ret;
+
+  ret = gnutls_rnd (GNUTLS_RND_RANDOM, dest, destlen);
+  if (ret < 0)
+    g_debug ("gnutls_rnd: %s\n", gnutls_strerror (ret));
 }
 
 static int
@@ -110,7 +114,7 @@ handle_stdin (Client *client)
   size_t nread = 0;
   int ret;
 
-  for (; nread < sizeof(buf); )
+  while (nread < sizeof(buf))
     {
       ret = read (STDIN_FILENO, buf + nread, sizeof(buf) - nread);
       if (ret == 0)
@@ -153,8 +157,8 @@ handle_stdin (Client *client)
           return -1;
         }
 
-      __attribute__((cleanup(stream_freep)))
-        Stream *stream = NULL;
+      __attribute__((cleanup(stream_freep))) Stream *stream = NULL;
+
       stream = stream_new (stream_id);
       if (!stream)
         return -1;
@@ -196,9 +200,7 @@ handle_stdin (Client *client)
 static int
 run (Client *client)
 {
-  struct epoll_event ev, events[MAX_EVENTS];
   __attribute__((cleanup(closep))) int epoll_fd = -1;
-  int flags;
 
   epoll_fd = epoll_create1 (0);
   if (epoll_fd < 0)
@@ -206,6 +208,8 @@ run (Client *client)
       g_message ("epoll_create1: %s", g_strerror (errno));
       return -1;
     }
+
+  int flags;
 
   flags = fcntl (STDIN_FILENO, F_GETFL, 0);
   if (flags < 0)
@@ -219,6 +223,8 @@ run (Client *client)
       g_message ("fcntl: %s", g_strerror (errno));
       return -1;
     }
+
+  struct epoll_event ev;
 
   ev.events = EPOLLIN | EPOLLET;
   ev.data.fd = STDIN_FILENO;
@@ -246,9 +252,8 @@ run (Client *client)
 
   for (;;)
     {
+      struct epoll_event events[MAX_EVENTS];
       int nfds;
-      int n;
-      ssize_t ret;
 
       nfds = epoll_wait (epoll_fd, events, MAX_EVENTS, -1);
       if (nfds < 0)
@@ -257,8 +262,10 @@ run (Client *client)
           return -1;
         }
 
-      for (n = 0; n < nfds; n++)
+      for (int n = 0; n < nfds; n++)
         {
+	  int ret;
+
           if (events[n].data.fd == connection_get_socket_fd (client->connection))
             {
               if (events[n].events & EPOLLIN)

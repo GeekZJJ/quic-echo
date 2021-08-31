@@ -50,7 +50,11 @@ server_deinit (Server *server)
 static void
 rand_cb (uint8_t *dest, size_t destlen, const ngtcp2_rand_ctx *rand_ctx)
 {
-  (void)gnutls_rnd (GNUTLS_RND_RANDOM, dest, destlen);
+  int ret;
+
+  ret = gnutls_rnd (GNUTLS_RND_RANDOM, dest, destlen);
+  if (ret < 0)
+    g_debug ("gnutls_rnd: %s\n", gnutls_strerror (ret));
 }
 
 static int
@@ -128,8 +132,7 @@ static const ngtcp2_callbacks callbacks =
 static Connection *
 find_connection (Server *server, const uint8_t *dcid, size_t dcid_size)
 {
-  GList *l = server->connections;
-  for (; l; l = l->next)
+  for (GList *l = server->connections; l; l = l->next)
     {
       Connection *connection = l->data;
       ngtcp2_conn *conn = connection_get_ngtcp2_conn (connection);
@@ -338,7 +341,6 @@ handle_incoming (Server *server)
 static int
 run (Server *server)
 {
-  struct epoll_event ev, events[MAX_EVENTS];
   __attribute__((cleanup(stream_freep))) Stream *stream = NULL;
 
   server->epoll_fd = epoll_create1 (0);
@@ -347,6 +349,8 @@ run (Server *server)
       g_message ("epoll_create1: %s", g_strerror (errno));
       return -1;
     }
+
+  struct epoll_event ev;
 
   ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
   ev.data.fd = server->socket_fd;
@@ -358,9 +362,8 @@ run (Server *server)
 
   for (;;)
     {
+      struct epoll_event events[MAX_EVENTS];
       int nfds;
-      int n;
-      ssize_t ret;
 
       nfds = epoll_wait (server->epoll_fd, events, MAX_EVENTS, -1);
       if (nfds < 0)
@@ -369,44 +372,41 @@ run (Server *server)
           return -1;
         }
 
-      for (n = 0; n < nfds; n++)
+      for (int n = 0; n < nfds; n++)
         {
+	  int ret;
+
           if (events[n].data.fd == server->socket_fd)
             {
               if (events[n].events & EPOLLIN)
                 (void)handle_incoming (server);
 
               if (events[n].events & EPOLLOUT)
-                {
-                  GList *l = server->connections;
-                  for (; l; l = l->next)
-                    {
-                      Connection *connection = l->data;
-                      (void)connection_write (connection);
-                    }
-                }
+		for (GList *l = server->connections; l; l = l->next)
+		  {
+		    Connection *connection = l->data;
+		    (void)connection_write (connection);
+		  }
             }
 	  else
-	    {
-	      GList *l = server->connections;
-	      for (; l; l = l->next)
-		{
-		  Connection *connection = l->data;
-		  if (events[n].data.fd == connection_get_timer_fd (connection))
-		    {
-		      ret = ngtcp2_conn_handle_expiry (connection_get_ngtcp2_conn (connection),
-						       timestamp ());
-		      if (ret < 0)
-                        {
-                          g_debug ("ngtcp2_conn_handle_expiry: %s",
-                                   ngtcp2_strerror (ret));
-                          continue;
-                        }
+	    for (GList *l = server->connections; l; l = l->next)
+	      {
+		Connection *connection = l->data;
+		if (events[n].data.fd == connection_get_timer_fd (connection))
+		  {
+		    ngtcp2_conn *conn =
+		      connection_get_ngtcp2_conn (connection);
+		    ret = ngtcp2_conn_handle_expiry (conn, timestamp ());
+		    if (ret < 0)
+		      {
+			g_debug ("ngtcp2_conn_handle_expiry: %s",
+				 ngtcp2_strerror (ret));
+			continue;
+		      }
 
-		      (void)connection_write (connection);
-		    }
-		}
-	    }
+		    (void)connection_write (connection);
+		  }
+	      }
         }
     }
 

@@ -70,8 +70,7 @@ connection_add_stream (Connection *connection, Stream *stream)
 Stream *
 connection_find_stream (Connection *connection, int64_t stream_id)
 {
-  GList *l = connection->streams;
-  for (; l; l = l->next)
+  for (GList *l = connection->streams; l; l = l->next)
     {
       Stream *stream = l->data;
       if (stream_get_id (stream) == stream_id)
@@ -288,15 +287,12 @@ connection_write (Connection *connection)
         return -1;
     }
   else
-    {
-      GList *l = connection->streams;
-      for (; l; l = l->next)
-        {
-          ret = write_to_stream (connection, l->data);
-          if (ret < 0)
-            return -1;
-        }
-    }
+    for (GList *l = connection->streams; l; l = l->next)
+      {
+	ret = write_to_stream (connection, l->data);
+	if (ret < 0)
+	  return -1;
+      }
 
   ngtcp2_tstamp expiry = ngtcp2_conn_get_expiry (connection->conn);
   ngtcp2_tstamp now = timestamp ();
