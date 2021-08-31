@@ -42,7 +42,8 @@ client_deinit (Client *client)
 }
 
 static void
-rand_cb (uint8_t *dest, size_t destlen, const ngtcp2_rand_ctx *rand_ctx)
+rand_cb (uint8_t *dest, size_t destlen,
+	 const ngtcp2_rand_ctx *rand_ctx __attribute__((unused)))
 {
   int ret;
 
@@ -52,8 +53,10 @@ rand_cb (uint8_t *dest, size_t destlen, const ngtcp2_rand_ctx *rand_ctx)
 }
 
 static int
-get_new_connection_id_cb (ngtcp2_conn *conn, ngtcp2_cid *cid, uint8_t *token,
-                          size_t cidlen, void *user_data)
+get_new_connection_id_cb (ngtcp2_conn *conn __attribute__((unused)),
+			  ngtcp2_cid *cid, uint8_t *token,
+                          size_t cidlen,
+			  void *user_data __attribute__((unused)))
 {
   int ret;
 
@@ -71,9 +74,11 @@ get_new_connection_id_cb (ngtcp2_conn *conn, ngtcp2_cid *cid, uint8_t *token,
 }
 
 static int
-acked_stream_data_offset_cb (ngtcp2_conn *conn, int64_t stream_id,
+acked_stream_data_offset_cb (ngtcp2_conn *conn __attribute__((unused)),
+			     int64_t stream_id,
                              uint64_t offset, uint64_t datalen,
-                             void *user_data, void *stream_user_data)
+                             void *user_data,
+			     void *stream_user_data __attribute__((unused)))
 {
   Connection *connection = user_data;
   Stream *stream = connection_find_stream (connection, stream_id);
@@ -83,9 +88,13 @@ acked_stream_data_offset_cb (ngtcp2_conn *conn, int64_t stream_id,
 }
 
 static int
-recv_stream_data_cb (ngtcp2_conn *conn, uint32_t flags, int64_t stream_id,
-                     uint64_t offset, const uint8_t *data, size_t datalen,
-                     void *user_data, void *stream_user_data)
+recv_stream_data_cb (ngtcp2_conn *conn __attribute__((unused)),
+		     uint32_t flags __attribute__((unused)),
+		     int64_t stream_id,
+                     uint64_t offset __attribute__((unused)),
+		     const uint8_t *data, size_t datalen,
+                     void *user_data __attribute__((unused)),
+		     void *stream_user_data __attribute__((unused)))
 {
   g_debug ("receiving %zu bytes from stream #%zd", datalen, stream_id);
   write (STDOUT_FILENO, data, datalen);

@@ -69,10 +69,10 @@ handshake_read_func (gnutls_session_t session,
 }
 
 static int
-alert_read_func (gnutls_session_t session,
-                 gnutls_record_encryption_level_t level,
-                 gnutls_alert_level_t alert_level,
-                 gnutls_alert_description_t alert_desc)
+alert_read_func (gnutls_session_t session __attribute__((unused)),
+                 gnutls_record_encryption_level_t level __attribute__((unused)),
+                 gnutls_alert_level_t alert_level __attribute__((unused)),
+                 gnutls_alert_description_t alert_desc __attribute__((unused)))
 {
   return 0;
 }
