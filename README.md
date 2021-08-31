@@ -57,6 +57,6 @@ tshark -o "tls.keylog_file: $PWD/keylog.txt" \
 
 ## License
 
-The MIT License.
+The MIT License
 
 [Understanding QUIC by examples]: https://devconfus2021.sched.com/event/lkfO/understanding-quic-by-examples
