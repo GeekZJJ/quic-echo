@@ -8,13 +8,11 @@
 
 #include <errno.h>
 #include <error.h>
-#include <fcntl.h>
 #include <glib.h>
 #include <gnutls/crypto.h>
 #include <gnutls/gnutls.h>
 #include <ngtcp2/ngtcp2.h>
 #include <ngtcp2/ngtcp2_crypto.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
@@ -190,8 +188,6 @@ accept_connection (Server *server,
       }
     };
 
-  __attribute__((cleanup(ngtcp2_conn_delp))) ngtcp2_conn *conn = NULL;
-
   ngtcp2_transport_params params;
   ngtcp2_transport_params_default (&params);
   params.initial_max_streams_uni = 3;
@@ -204,6 +200,8 @@ accept_connection (Server *server,
   ngtcp2_cid scid;
   if (get_random_cid (&scid) < 0)
     return NULL;
+
+  __attribute__((cleanup(ngtcp2_conn_delp))) ngtcp2_conn *conn = NULL;
 
   ret = ngtcp2_conn_server_new (&conn,
                                 &header.scid,
