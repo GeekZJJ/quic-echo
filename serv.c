@@ -66,6 +66,11 @@ get_new_connection_id_cb (ngtcp2_conn *conn, ngtcp2_cid *cid, uint8_t *token,
     return NGTCP2_ERR_CALLBACK_FAILURE;
 
   cid->datalen = cidlen;
+
+  ret = gnutls_rnd (GNUTLS_RND_RANDOM, token, NGTCP2_STATELESS_RESET_TOKENLEN);
+  if (ret < 0)
+    return NGTCP2_ERR_CALLBACK_FAILURE;
+
   return 0;
 }
 
