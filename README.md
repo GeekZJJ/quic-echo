@@ -8,7 +8,7 @@ QUIC by examples].
 1. Install Meson, GLib, and GnuTLS 3.7.2
 
 ```console
-dnf install meson glib2-devel gnutls-devel
+$ dnf install meson glib2-devel gnutls-devel
 ```
 
 2. `meson _build`
@@ -20,13 +20,13 @@ dnf install meson glib2-devel gnutls-devel
 ### Server
 
 ```console
-_build/serv localhost 5556 credentials/server-key.pem credentials/server.pem
+$ _build/serv localhost 5556 credentials/server-key.pem credentials/server.pem
 ```
 
 ### Client
 
 ```console
-_build/cli localhost 5556 credentials/ca.pem
+$ _build/cli localhost 5556 credentials/ca.pem
 ```
 
 ### Logging
@@ -40,14 +40,14 @@ facility, set the same variable to `ngtcp2`.
 1. Run either `cli` or `serv` with the `SSLKEYLOGFILE` envvar set:
 
 ```console
-SSLKEYLOGFILE=$PWD/keylog.txt _build/cli localhost 5556 credentials/ca.pem
+$ SSLKEYLOGFILE=$PWD/keylog.txt _build/cli localhost 5556 credentials/ca.pem
 ```
 
 2. Use wireshark or tshark to capture the traffic:
 
 ```console
-tshark -o "tls.keylog_file: $PWD/keylog.txt" \
-       -i lo -Px -O quic -Y "udp.port == 5556"
+$tshark -o "tls.keylog_file: $PWD/keylog.txt" \
+        -i lo -Px -O quic -Y "udp.port == 5556"
 ```
 
 ## TODO
