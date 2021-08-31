@@ -42,6 +42,8 @@ server_deinit (Server *server)
     close (server->epoll_fd);
   if (server->socket_fd >= 0)
     close (server->socket_fd);
+  if (server->cred)
+    gnutls_certificate_free_credentials (server->cred);
   g_list_free_full (server->connections, (GDestroyNotify)connection_free);
 }
 
@@ -323,7 +325,7 @@ handle_incoming (Server *server)
           GList *link =
             g_list_find (server->connections, connection);
           server->connections =
-            g_list_remove_link (server->connections, link);
+            g_list_delete_link (server->connections, link);
           ret = epoll_ctl (server->epoll_fd, EPOLL_CTL_DEL,
                            connection_get_timer_fd (connection),
                            NULL);
@@ -337,6 +339,7 @@ handle_incoming (Server *server)
           connection_free (connection);
         }
     }
+  return 0;
 }
 
 #define MAX_EVENTS 64
@@ -382,7 +385,7 @@ run (Server *server)
           if (events[n].data.fd == server->socket_fd)
             {
               if (events[n].events & EPOLLIN)
-                (void)handle_incoming (server);
+		(void)handle_incoming (server);
 
               if (events[n].events & EPOLLOUT)
 		for (GList *l = server->connections; l; l = l->next)
