@@ -257,17 +257,17 @@ handle_incoming (Server *server)
 
   for (;;)
     {
-      ssize_t nread;
+      ssize_t n_read;
       struct sockaddr_storage remote_addr;
       size_t remote_addrlen = sizeof(remote_addr);
       int ret;
 
-      nread = recv_packet (server->socket_fd, buf, sizeof(buf),
+      n_read = recv_packet (server->socket_fd, buf, sizeof(buf),
                            (struct sockaddr *)&remote_addr,
                            &remote_addrlen);
-      if (nread < 0)
+      if (n_read < 0)
         {
-          if (nread != EAGAIN && nread != EWOULDBLOCK)
+          if (n_read != EAGAIN && n_read != EWOULDBLOCK)
             return 0;
           g_message ("recv_packet: %s\n", g_strerror (errno));
           return -1;
@@ -280,7 +280,7 @@ handle_incoming (Server *server)
       ret = ngtcp2_pkt_decode_version_cid (&version,
                                            &dcid, &dcidlen,
                                            &scid, &scidlen,
-                                           buf, nread,
+                                           buf, n_read,
                                            NGTCP2_MAX_CIDLEN);
       if (ret < 0)
         {
@@ -296,7 +296,7 @@ handle_incoming (Server *server)
           connection = accept_connection (server,
                                           (struct sockaddr *)&remote_addr,
                                           remote_addrlen,
-                                          buf, nread);
+                                          buf, n_read);
           if (!connection)
             return -1;
 
@@ -325,7 +325,7 @@ handle_incoming (Server *server)
       ngtcp2_pkt_info pi;
       memset (&pi, 0, sizeof(pi));
 
-      ret = ngtcp2_conn_read_pkt (conn, &path, &pi, buf, nread, timestamp ());
+      ret = ngtcp2_conn_read_pkt (conn, &path, &pi, buf, n_read, timestamp ());
       if (ret < 0)
         {
           g_message ("ngtcp2_conn_read_pkt: %s",

@@ -226,37 +226,36 @@ write_to_stream (Connection *connection, Stream *stream)
           stream_id = -1;
         }
 
-      ngtcp2_ssize datalen;
-      ngtcp2_ssize nwrite;
+      ngtcp2_ssize n_read, n_written;
 
-      nwrite = ngtcp2_conn_writev_stream (connection->conn, &ps.path, &pi,
-                                          buf, sizeof(buf),
-                                          &datalen,
-                                          flags,
-                                          stream_id,
-                                          &datav, 1,
-                                          ts);
-      if (nwrite < 0)
+      n_written = ngtcp2_conn_writev_stream (connection->conn, &ps.path, &pi,
+					     buf, sizeof(buf),
+					     &n_read,
+					     flags,
+					     stream_id,
+					     &datav, 1,
+					     ts);
+      if (n_written < 0)
         {
-          if (nwrite == NGTCP2_ERR_WRITE_MORE)
+          if (n_written == NGTCP2_ERR_WRITE_MORE)
             {
-              stream_mark_sent (stream, datalen);
+              stream_mark_sent (stream, n_read);
               continue;
             }
           g_message ("ngtcp2_conn_writev_stream: %s",
-                     ngtcp2_strerror ((int)nwrite));
+                     ngtcp2_strerror ((int)n_written));
           return -1;
         }
 
-      if (nwrite == 0)
+      if (n_written == 0)
         return 0;
 
-      if (stream && datalen > 0)
-        stream_mark_sent (stream, datalen);
+      if (stream && n_read > 0)
+        stream_mark_sent (stream, n_read);
 
       int ret;
 
-      ret = send_packet (connection->socket_fd, buf, nwrite,
+      ret = send_packet (connection->socket_fd, buf, n_written,
                          (struct sockaddr *)&connection->remote_addr,
                          connection->remote_addrlen);
       if (ret < 0)
@@ -334,18 +333,21 @@ connection_close (Connection *connection, uint64_t error_code)
   ngtcp2_path_storage ps;
   ngtcp2_path_storage_zero(&ps);
 
-  ngtcp2_ssize ret;
-  ret = ngtcp2_conn_write_connection_close (connection->conn,
-                                            &ps.path, &pi,
-                                            buf, sizeof(buf),
-                                            error_code,
-                                            timestamp());
-  if (ret < 0)
+  ngtcp2_ssize n_written;
+
+  n_written = ngtcp2_conn_write_connection_close (connection->conn,
+						  &ps.path, &pi,
+						  buf, sizeof(buf),
+						  error_code,
+						  timestamp());
+  if (n_written < 0)
     g_message ("ngtcp2_conn_write_connection_close: %s",
-               ngtcp2_strerror ((int)ret));
+               ngtcp2_strerror ((int)n_written));
   else
     {
-      ret = send_packet (connection->socket_fd, buf, (size_t)ret,
+      ssize_t ret;
+
+      ret = send_packet (connection->socket_fd, buf, (size_t)n_written,
                          (struct sockaddr *)&connection->remote_addr,
                          connection->remote_addrlen);
       if (ret < 0)

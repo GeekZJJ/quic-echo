@@ -125,12 +125,12 @@ static int
 handle_stdin (Client *client)
 {
   uint8_t buf[BUF_SIZE];
-  size_t nread = 0;
+  size_t n_read = 0;
   int ret;
 
-  while (nread < sizeof(buf))
+  while (n_read < sizeof(buf))
     {
-      ret = read (STDIN_FILENO, buf + nread, sizeof(buf) - nread);
+      ret = read (STDIN_FILENO, buf + n_read, sizeof(buf) - n_read);
       if (ret == 0)
         {
           connection_close (client->connection, 0);
@@ -144,9 +144,9 @@ handle_stdin (Client *client)
           return -1;
         }
       else
-        nread += ret;
+        n_read += ret;
     }
-  if (nread == sizeof(buf))
+  if (n_read == sizeof(buf))
     {
       g_message ("read buffer overflow");
       return -1;
@@ -188,11 +188,11 @@ handle_stdin (Client *client)
   if (client->streams[client->stream_index])
     {
       ret = stream_push_data (client->streams[client->stream_index],
-                              buf, nread);
+                              buf, n_read);
       if (ret < 0)
         return -1;
 
-      g_debug ("buffered %zd bytes", nread);
+      g_debug ("buffered %zd bytes", n_read);
 
       if (++client->coalesce_count < client->n_coalescing)
         return 0;
