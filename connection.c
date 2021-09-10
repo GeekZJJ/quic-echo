@@ -183,7 +183,10 @@ connection_read (Connection *connection)
       ret = ngtcp2_conn_read_pkt (connection->conn, &path, &pi, buf, ret,
                                   timestamp ());
       if (ret < 0)
-        return -1;
+	{
+          g_message ("ngtcp2_conn_read_pkt: %s", ngtcp2_strerror (ret));
+	  return -1;
+	}
     }
 
   return 0;

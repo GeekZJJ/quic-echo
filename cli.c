@@ -406,6 +406,8 @@ main (int argc, char **argv)
   if (!session)
     error (EXIT_FAILURE, EINVAL, "create_tls_client_session failed\n");
 
+  gnutls_session_set_verify_cert (session, argv[1], 0);
+
   /* Create an ngtcp2 client connection */
   ngtcp2_path path =
     {
