@@ -5,10 +5,10 @@ QUIC by examples].
 
 ## Compiling
 
-1. Install Meson, GLib, and GnuTLS 3.7.2
+1. Install Meson, GLib, GnuTLS 3.7.2, and the dependencies
 
 ```console
-$ dnf install meson glib2-devel gnutls-devel
+$ dnf install cmake gcc glib2-devel gnutls-devel g++ meson ninja-build
 ```
 
 2. `meson _build`
