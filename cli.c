@@ -133,7 +133,7 @@ handle_stdin (Client *client)
       ret = read (STDIN_FILENO, buf + n_read, sizeof(buf) - n_read);
       if (ret == 0)
         {
-          connection_close (client->connection, 0);
+          connection_close (client->connection);
           return 0;
         }
       else if (ret < 0)
@@ -451,6 +451,8 @@ main (int argc, char **argv)
   if (ret < 0)
     error (EXIT_FAILURE, EINVAL, "ngtcp2_conn_client_new: %s\n",
            ngtcp2_strerror (ret));
+
+  ngtcp2_conn_set_keep_alive_timeout(conn, NGTCP2_SECONDS * 30);
 
   connection_set_ngtcp2_conn (connection, g_steal_pointer (&conn));
   connection_set_local_addr (connection,

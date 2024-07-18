@@ -151,7 +151,7 @@ find_connection (Server *server, const uint8_t *dcid, size_t dcid_size)
     {
       Connection *connection = l->data;
       ngtcp2_conn *conn = connection_get_ngtcp2_conn (connection);
-      size_t n_scids = ngtcp2_conn_get_num_scid (conn);
+      size_t n_scids = ngtcp2_conn_get_scid (conn, NULL);
       g_autofree ngtcp2_cid *scids = NULL;
 
       scids = g_new (ngtcp2_cid, n_scids);
@@ -212,6 +212,7 @@ accept_connection (Server *server,
   params.initial_max_stream_data_bidi_local = 128 * 1024;
   params.initial_max_stream_data_bidi_remote = 128 * 1024;
   params.initial_max_data = 1024 * 1024;
+  params.original_dcid_present = 1;
   memcpy (&params.original_dcid, &header.dcid, sizeof (params.original_dcid));
 
   ngtcp2_cid scid;
@@ -236,6 +237,8 @@ accept_connection (Server *server,
                ngtcp2_strerror (ret));
       return NULL;
     }
+
+  ngtcp2_conn_set_keep_alive_timeout(conn, NGTCP2_SECONDS * 30);
 
   connection_set_ngtcp2_conn (connection, g_steal_pointer (&conn));
   connection_set_local_addr (connection,
@@ -273,13 +276,9 @@ handle_incoming (Server *server)
           return -1;
         }
 
-      uint32_t version;
-      const uint8_t *dcid, *scid;
-      size_t dcidlen, scidlen;
+      ngtcp2_version_cid vc;
 
-      ret = ngtcp2_pkt_decode_version_cid (&version,
-                                           &dcid, &dcidlen,
-                                           &scid, &scidlen,
+      ret = ngtcp2_pkt_decode_version_cid (&vc,
                                            buf, n_read,
                                            NGTCP2_MAX_CIDLEN);
       if (ret < 0)
@@ -290,7 +289,7 @@ handle_incoming (Server *server)
         }
 
       /* Find any existing connection by DCID */
-      Connection *connection = find_connection (server, dcid, dcidlen);
+      Connection *connection = find_connection (server, vc.dcid, vc.dcidlen);
       if (!connection)
         {
           connection = accept_connection (server,

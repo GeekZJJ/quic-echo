@@ -307,7 +307,7 @@ connection_write (Connection *connection)
       g_message ("timerfd_settime: %s", g_strerror (errno));
       return -1;
     }
-  if (expiry < now)
+  if (expiry <= now)
     {
       it.it_value.tv_sec = 0;
       it.it_value.tv_nsec = 1;
@@ -328,7 +328,7 @@ connection_write (Connection *connection)
 }
 
 void
-connection_close (Connection *connection, uint64_t error_code)
+connection_close (Connection *connection)
 {
   ngtcp2_pkt_info pi;
   uint8_t buf[BUF_SIZE];
@@ -337,11 +337,12 @@ connection_close (Connection *connection, uint64_t error_code)
   ngtcp2_path_storage_zero(&ps);
 
   ngtcp2_ssize n_written;
+  ngtcp2_ccerr ccerr;
 
   n_written = ngtcp2_conn_write_connection_close (connection->conn,
 						  &ps.path, &pi,
 						  buf, sizeof(buf),
-						  error_code,
+						  &ccerr,
 						  timestamp());
   if (n_written < 0)
     g_message ("ngtcp2_conn_write_connection_close: %s",

@@ -30,7 +30,7 @@ void connection_set_remote_addr (Connection *connection,
 int connection_start (Connection *connection);
 int connection_read (Connection *connection);
 int connection_write (Connection *connection);
-void connection_close (Connection *connection, uint64_t error_code);
+void connection_close (Connection *connection);
 bool connection_is_closed (Connection *connection);
 
 void connection_add_stream (Connection *connection, Stream *stream);
