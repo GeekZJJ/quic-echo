@@ -7,8 +7,21 @@
 #include <gnutls/gnutls.h>
 #include <ngtcp2/ngtcp2.h>
 #include <stdbool.h>
+#include "subprojects/ngtcp2/lib/ngtcp2_map.h"
 
 typedef struct _Connection Connection;
+
+typedef struct {
+  ngtcp2_map_key_type id;
+  void *data;
+  size_t datalen;
+} datagram;
+
+int free_datagram(void *data, void *);
+datagram *new_datagram(uint64_t id, void *data, size_t datalen);
+void retrans_datagram(Connection *connection, datagram *dgram);
+ngtcp2_map *connection_get_waitmap (Connection *connection);
+ngtcp2_map *connection_get_writemap (Connection *connection);
 
 Connection *connection_new (gnutls_session_t session, int socket_fd);
 void connection_free (Connection *connection);

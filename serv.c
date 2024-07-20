@@ -123,6 +123,57 @@ recv_stream_data_cb (ngtcp2_conn *conn __attribute__((unused)),
   return 0;
 }
 
+uint64_t datagram_id = 0;
+
+int recv_datagram_cb(ngtcp2_conn *conn, uint32_t flags, const uint8_t *data, size_t datalen, void *user_data) {
+    Connection *connection = user_data;
+    g_message("recv_datagram_cb len = %ld: %s", datalen, data);
+    datagram *newdatagram = new_datagram(datagram_id++, (void *)data, datalen);
+    if (!newdatagram) {
+        g_error("malloc datagram failed");
+        return 0;
+    }
+    int reti = ngtcp2_map_insert(connection_get_writemap(connection), newdatagram->id, newdatagram);
+    if (reti!=0) {
+        g_error("ngtcp2_map_insert %lu failed", newdatagram->id);
+        free_datagram(newdatagram, NULL);
+        return 0;
+    }
+    return 0;
+}
+
+int ack_datagram_cb(ngtcp2_conn *conn, uint64_t dgram_id, void *user_data) {
+    Connection *connection = user_data;
+    ngtcp2_map *wait_map = connection_get_waitmap(connection);
+    datagram *data = ngtcp2_map_find(wait_map, dgram_id);
+    if (data) {
+        ngtcp2_map_remove(wait_map, dgram_id);
+        free_datagram(data, NULL);
+        g_debug("ack_datagram_cb %lu, free it, map size %lu", dgram_id, ngtcp2_map_size(wait_map));
+    } else {
+        g_message("ack_datagram_cb %lu, but not exist in map", dgram_id);
+    }
+    return 0;
+}
+
+int lost_datagram_cb(ngtcp2_conn *conn, uint64_t dgram_id, void *user_data) {
+    Connection *connection = user_data;
+    ngtcp2_map *wait_map = connection_get_waitmap(connection);
+    datagram *dgram = ngtcp2_map_find(wait_map, dgram_id);
+    if (dgram) {
+        g_message("lost_datagram_cb %lu, retrans it", dgram_id);
+        retrans_datagram(connection, dgram);
+    } else {
+        g_message("lost_datagram_cb %lu, but not exist in map", dgram_id);
+    }
+  return 0;
+}
+
+static int handshake_completed_cb(ngtcp2_conn *conn, void *user_data) {
+    g_message("QUIC handshake has completed");
+    return 0;
+}
+
 static const ngtcp2_callbacks callbacks =
   {
     /* Use the default implementation from ngtcp2_crypto */
@@ -142,6 +193,10 @@ static const ngtcp2_callbacks callbacks =
     .stream_open = stream_open_cb,
     .rand = rand_cb,
     .get_new_connection_id = get_new_connection_id_cb,
+    .handshake_completed = handshake_completed_cb,
+    .recv_datagram = recv_datagram_cb,
+    .ack_datagram = ack_datagram_cb,
+    .lost_datagram = lost_datagram_cb,
   };
 
 static Connection *
@@ -213,6 +268,7 @@ accept_connection (Server *server,
   params.initial_max_stream_data_bidi_remote = 128 * 1024;
   params.initial_max_data = 1024 * 1024;
   params.original_dcid_present = 1;
+  params.max_datagram_frame_size = 1800;
   memcpy (&params.original_dcid, &header.dcid, sizeof (params.original_dcid));
 
   ngtcp2_cid scid;

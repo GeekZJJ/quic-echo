@@ -22,8 +22,36 @@ struct _Connection
   struct sockaddr_storage remote_addr;
   size_t remote_addrlen;
   GList *streams;
+  ngtcp2_map write_map;
+  ngtcp2_map wait_map;
   bool is_closed;
 };
+
+datagram *new_datagram(uint64_t id, void *data, size_t datalen) {
+    datagram *newdatagram = malloc(sizeof(datagram));
+    if (!newdatagram) {
+        g_error("malloc datagram failed");
+        return NULL;
+    }
+    newdatagram->datalen = datalen;
+    newdatagram->data = malloc(datalen);
+    if (!newdatagram->data) {
+        g_error("malloc datagram.data failed");
+        free(newdatagram);
+        return NULL;
+    }
+    memset(newdatagram->data, 0, newdatagram->datalen);
+    memcpy(newdatagram->data, data, datalen);
+    newdatagram->id = id;
+    return newdatagram;
+}
+
+int free_datagram(void *data, void *) {
+    datagram *datagram = data;
+    free(datagram->data);
+    free(datagram);
+    return 0;
+}
 
 Connection *
 connection_new (gnutls_session_t session,
@@ -40,6 +68,9 @@ connection_new (gnutls_session_t session,
   connection->socket_fd = socket_fd;
   connection->timer_fd = -1;
 
+  ngtcp2_map_init(&connection->wait_map, ngtcp2_mem_default());
+  ngtcp2_map_init(&connection->write_map, ngtcp2_mem_default());
+
   return g_steal_pointer (&connection);
 }
 
@@ -48,6 +79,12 @@ connection_free (Connection *connection)
 {
   if (!connection)
     return;
+
+  ngtcp2_map_each_free(&connection->wait_map, free_datagram, NULL);
+  ngtcp2_map_each_free(&connection->write_map, free_datagram, NULL);
+
+  ngtcp2_map_free(&connection->wait_map);
+  ngtcp2_map_free(&connection->write_map);
 
   if (connection->session)
     gnutls_deinit (connection->session);
@@ -77,6 +114,16 @@ connection_find_stream (Connection *connection, int64_t stream_id)
         return stream;
     }
   return NULL;
+}
+
+ngtcp2_map *
+connection_get_waitmap (Connection *connection) {
+    return &connection->wait_map;
+}
+
+ngtcp2_map *
+connection_get_writemap (Connection *connection) {
+    return &connection->write_map;
 }
 
 ngtcp2_conn *
@@ -192,6 +239,145 @@ connection_read (Connection *connection)
   return 0;
 }
 
+void retrans_datagram(Connection *connection, datagram *data) {
+    int n_accepted;
+    uint64_t ts = timestamp();
+    uint8_t buf[BUF_SIZE];
+    ngtcp2_pkt_info pi;
+    ngtcp2_path_storage ps;
+    ngtcp2_path_storage_zero(&ps);
+    ngtcp2_vec datav = {
+        .base = NULL,
+        .len = 0,
+    };
+
+    if (data) {
+        datav.base = data->data;
+        datav.len = data->datalen;
+        g_message("retrans_datagram %lu", data->id);
+    } else {
+        g_info("retrans_datagram not exist in map");
+        return;
+    }
+
+    ngtcp2_ssize n_written = ngtcp2_conn_writev_datagram(connection->conn, &ps.path, &pi,
+                        buf, sizeof(buf),
+                        &n_accepted,
+                        0,
+                        data->id,
+                        &datav, 1,
+                        ts);
+    if (n_written <= 0) {
+        g_message ("ngtcp2_conn_writev_stream: %s", ngtcp2_strerror ((int)n_written));
+        ngtcp2_map_remove(connection_get_waitmap(connection), data->id);
+        free_datagram(data, NULL);
+        return;
+    }
+
+    int ret = send_packet (connection->socket_fd, buf, n_written,
+                        (struct sockaddr *)&connection->remote_addr,
+                        connection->remote_addrlen);
+    if (ret < 0) {
+        g_message ("send_packet: %s", strerror (errno));
+        return;
+    }
+    g_message ("retrans send_packet: %ld", n_written);
+}
+
+typedef struct {
+    void **values;
+    size_t valueslen;
+    size_t valuescap;
+} iter_datagrams_context;
+
+int iter_datagrams(void *data, void *ptr) {
+    iter_datagrams_context *ctx = ptr;
+    if (ctx->valueslen == ctx->valuescap) {
+        size_t newcap = ctx->valuescap << 1;
+        void *newvalues = realloc(ctx->values, newcap);
+        if (newvalues == NULL) {
+            g_message ("iter_datagrams: out of memory");
+            return -ENOMEM;
+        }
+        ctx->values = newvalues;
+        ctx->valuescap = newcap;
+    }
+    ctx->values[ctx->valueslen++] = data;
+    return 0;
+}
+
+static int write_datagram (Connection *connection) {
+    uint8_t buf[BUF_SIZE];
+
+    ngtcp2_path_storage ps;
+    ngtcp2_path_storage_zero(&ps);
+
+    ngtcp2_pkt_info pi;
+    uint64_t ts = timestamp ();
+
+    uint32_t flags = NGTCP2_WRITE_DATAGRAM_FLAG_MORE;
+
+    size_t key_size = ngtcp2_map_size(&connection->write_map);
+
+    if (key_size == 0) {
+        return 0;
+    }
+
+    iter_datagrams_context ictx = {
+        .values = NULL,
+        .valuescap = key_size,
+        .valueslen = 0,
+    };
+    ictx.values = malloc(ictx.valuescap);
+
+    ngtcp2_map_each(&connection->write_map, iter_datagrams, &ictx);
+
+    for (int i = 0; i < key_size; i++) {
+        datagram *datagram = ictx.values[i];
+        int n_accepted;
+        ngtcp2_vec datav = {
+            .base = datagram->data,
+            .len = datagram->datalen,
+        };
+
+        if ((i+1)==key_size) {
+            flags &= ~NGTCP2_WRITE_DATAGRAM_FLAG_MORE;
+        }
+
+        ngtcp2_ssize n_written = ngtcp2_conn_writev_datagram(connection->conn, &ps.path, &pi,
+                            buf, sizeof(buf),
+                            &n_accepted,
+                            flags,
+                            datagram->id,
+                            &datav, 1,
+                            ts);
+        if (n_written < 0) {
+            if (n_written == NGTCP2_ERR_WRITE_MORE)
+                continue;
+            g_message ("ngtcp2_conn_writev_datagram: %s", ngtcp2_strerror ((int)n_written));
+            break;
+        }
+        if (n_written == 0) {
+            break;
+        }
+        if (n_accepted > 0) {
+            ngtcp2_map_remove(&connection->write_map, datagram->id);
+            ngtcp2_map_insert(&connection->wait_map, datagram->id, datagram);
+        }
+
+        int ret = send_packet (connection->socket_fd, buf, n_written,
+                            (struct sockaddr *)&connection->remote_addr,
+                            connection->remote_addrlen);
+        if (ret < 0) {
+            g_message ("send_packet: %s", strerror (errno));
+            break;
+        }
+    }
+    free(ictx.values);
+
+  return 0;
+}
+
 static int
 write_to_stream (Connection *connection, Stream *stream)
 {
@@ -281,20 +467,8 @@ int
 connection_write (Connection *connection)
 {
   int ret;
-
-  if (!connection->streams)
-    {
-      ret = write_to_stream (connection, NULL);
-      if (ret < 0)
-        return -1;
-    }
-  else
-    for (GList *l = connection->streams; l; l = l->next)
-      {
-	ret = write_to_stream (connection, l->data);
-	if (ret < 0)
-	  return -1;
-      }
+  write_datagram(connection);
+  write_to_stream(connection, NULL);
 
   ngtcp2_tstamp expiry = ngtcp2_conn_get_expiry (connection->conn);
   ngtcp2_tstamp now = timestamp ();

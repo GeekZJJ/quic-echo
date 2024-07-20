@@ -101,6 +101,43 @@ recv_stream_data_cb (ngtcp2_conn *conn __attribute__((unused)),
   return 0;
 }
 
+int recv_datagram_cb(ngtcp2_conn *conn, uint32_t flags, const uint8_t *data, size_t datalen, void *user_data) {
+    g_message("recv_datagram_cb len = %ld: %s", datalen, data);
+    return 0;
+}
+
+int ack_datagram_cb(ngtcp2_conn *conn, uint64_t dgram_id, void *user_data) {
+    Connection *connection = user_data;
+    ngtcp2_map *wait_map = connection_get_waitmap(connection);
+    datagram *data = ngtcp2_map_find(wait_map, dgram_id);
+    if (data) {
+        ngtcp2_map_remove(wait_map, dgram_id);
+        free_datagram(data, NULL);
+        g_debug("ack_datagram_cb %lu, free it, map size %lu", dgram_id, ngtcp2_map_size(wait_map));
+    } else {
+        g_message("ack_datagram_cb %lu, but not exist in map", dgram_id);
+    }
+    return 0;
+}
+
+int lost_datagram_cb(ngtcp2_conn *conn, uint64_t dgram_id, void *user_data) {
+    Connection *connection = user_data;
+    ngtcp2_map *wait_map = connection_get_waitmap(connection);
+    datagram *dgram = ngtcp2_map_find(wait_map, dgram_id);
+    if (dgram) {
+        g_message("lost_datagram_cb %lu, retrans it", dgram_id);
+        retrans_datagram(connection, dgram);
+    } else {
+        g_message("lost_datagram_cb %lu, but not exist in map", dgram_id);
+    }
+    return 0;
+}
+
+static int handshake_completed_cb(ngtcp2_conn *conn, void *user_data) {
+    g_message("QUIC handshake has completed");
+  return 0;
+}
+
 static const ngtcp2_callbacks callbacks =
   {
     /* Use the default implementation from ngtcp2_crypto */
@@ -119,7 +156,13 @@ static const ngtcp2_callbacks callbacks =
     .recv_stream_data = recv_stream_data_cb,
     .rand = rand_cb,
     .get_new_connection_id = get_new_connection_id_cb,
+    .handshake_completed = handshake_completed_cb,
+    .recv_datagram = recv_datagram_cb,
+    .ack_datagram = ack_datagram_cb,
+    .lost_datagram = lost_datagram_cb,
   };
+
+uint64_t datagram_id = 0;
 
 static int
 handle_stdin (Client *client)
@@ -151,60 +194,23 @@ handle_stdin (Client *client)
       g_message ("read buffer overflow");
       return -1;
     }
+    buf[n_read-1] = 0;
 
-  if (!client->streams[client->stream_index])
-    {
-      ngtcp2_conn *conn = connection_get_ngtcp2_conn (client->connection);
-      if (!ngtcp2_conn_get_streams_bidi_left (conn))
-        {
-          g_info ("no available bidi streams; skipping");
-          return 0;
-        }
-
-      int64_t stream_id;
-
-      ret = ngtcp2_conn_open_bidi_stream (conn, &stream_id, NULL);
-      if (ret < 0)
-        {
-          g_message ("ngtcp2_conn_open_bidi_stream: %s",
-                     ngtcp2_strerror (ret));
-          return -1;
-        }
-
-      __attribute__((cleanup(stream_freep))) Stream *stream = NULL;
-
-      stream = stream_new (stream_id);
-      if (!stream)
-        return -1;
-
-      client->streams[client->stream_index] =
-        g_steal_pointer (&stream);
-      connection_add_stream (client->connection,
-                             client->streams[client->stream_index]);
-
-      g_debug ("opened stream #%zd", stream_id);
+    datagram *newdatagram = new_datagram(datagram_id++, buf, n_read);
+    if (!newdatagram) {
+        g_error("malloc datagram failed");
+        return 0;
     }
-
-  if (client->streams[client->stream_index])
-    {
-      ret = stream_push_data (client->streams[client->stream_index],
-                              buf, n_read);
-      if (ret < 0)
-        return -1;
-
-      g_debug ("buffered %zd bytes", n_read);
-
-      if (++client->coalesce_count < client->n_coalescing)
+    int reti = ngtcp2_map_insert(connection_get_writemap(client->connection), newdatagram->id, newdatagram);
+    if (reti!=0) {
+        g_error("ngtcp2_map_insert %lu failed", newdatagram->id);
+        free_datagram(newdatagram, NULL);
         return 0;
     }
 
   ret = connection_write (client->connection);
   if (ret < 0)
     return -1;
-
-  client->stream_index++;
-  client->stream_index %= client->n_streams;
-  client->coalesce_count = 0;
 
   return 0;
 }
@@ -431,6 +437,7 @@ main (int argc, char **argv)
   params.initial_max_streams_uni = 3;
   params.initial_max_stream_data_bidi_local = 128 * 1024;
   params.initial_max_data = 1024 * 1024;
+  params.max_datagram_frame_size = 1800;
 
   ngtcp2_cid scid, dcid;
   if (get_random_cid (&scid) < 0 || get_random_cid (&dcid) < 0)

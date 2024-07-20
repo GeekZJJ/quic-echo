@@ -1,0 +1,12 @@
+diff --git a/lib/CMakeLists.txt b/lib/CMakeLists.txt
+index b1b977af..a4e1a25e 100644
+--- a/lib/CMakeLists.txt
++++ b/lib/CMakeLists.txt
+@@ -80,7 +80,6 @@ if(ENABLE_SHARED_LIB)
+   set_target_properties(ngtcp2 PROPERTIES
+     COMPILE_FLAGS "${WARNCFLAGS}"
+     VERSION ${LT_VERSION} SOVERSION ${LT_SOVERSION}
+-    C_VISIBILITY_PRESET hidden
+     POSITION_INDEPENDENT_CODE ON
+   )
+   target_include_directories(ngtcp2 PUBLIC ${ngtcp2_INCLUDE_DIRS})
