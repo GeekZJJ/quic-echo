@@ -20,7 +20,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define BUF_SIZE 1280
+#define BUF_SIZE 12800
 
 typedef struct _Server
 {
@@ -543,6 +543,10 @@ main (int argc, char **argv)
   ngtcp2_settings_default (&server.settings);
   server.settings.initial_ts = timestamp ();
   server.settings.log_printf = log_printf;
+  uint16_t pmtud_probes[] = {1300, 1400, 1500};
+  server.settings.pmtud_probes = pmtud_probes;
+  server.settings.pmtud_probeslen = 3;
+  server.settings.max_tx_udp_payload_size = 1500;
 
   return run (&server) < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

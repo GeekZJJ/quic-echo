@@ -21,7 +21,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define BUF_SIZE 1280
+#define BUF_SIZE 12800
 #define MAX_STREAMS 10
 
 typedef struct _Client
@@ -431,6 +431,10 @@ main (int argc, char **argv)
   ngtcp2_settings_default (&settings);
   settings.initial_ts = timestamp ();
   settings.log_printf = log_printf;
+  uint16_t pmtud_probes[] = {1300, 1400, 1500};
+  settings.pmtud_probes = pmtud_probes;
+  settings.pmtud_probeslen = 3;
+  settings.max_tx_udp_payload_size = 1500;
 
   ngtcp2_transport_params params;
   ngtcp2_transport_params_default (&params);
