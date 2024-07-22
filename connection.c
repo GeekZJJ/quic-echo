@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include "utils.h"
 
-#define BUF_SIZE 1280
+#define BUF_SIZE 12800
 
 struct _Connection
 {
