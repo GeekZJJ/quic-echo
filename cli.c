@@ -3,17 +3,14 @@
 #include "config.h"
 
 #include "connection.h"
-#include "gnutls-glue.h"
+#include "plaintext.h"
 #include "utils.h"
 
 #include <errno.h>
 #include <error.h>
 #include <fcntl.h>
 #include <glib.h>
-#include <gnutls/crypto.h>
-#include <gnutls/gnutls.h>
 #include <ngtcp2/ngtcp2.h>
-#include <ngtcp2/ngtcp2_crypto.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
@@ -41,15 +38,28 @@ client_deinit (Client *client)
   connection_free (client->connection);
 }
 
+int rand_bytes(uint8_t *data, size_t len)
+{
+    static int for_srand = 0;
+    if (!for_srand) {
+        srand(timestamp());
+        for_srand = 1;
+    }
+
+    for (size_t i = 0; i < len; ++i)
+        data[i] = (uint8_t)rand();
+
+    return 1;
+}
+
 static void
 rand_cb (uint8_t *dest, size_t destlen,
 	 const ngtcp2_rand_ctx *rand_ctx __attribute__((unused)))
 {
-  int ret;
-
-  ret = gnutls_rnd (GNUTLS_RND_RANDOM, dest, destlen);
-  if (ret < 0)
-    g_debug ("gnutls_rnd: %s\n", gnutls_strerror (ret));
+    size_t i;
+    for (i = 0; i < destlen; ++i) {
+        *dest = (uint8_t) random();
+    }
 }
 
 static int
@@ -58,19 +68,15 @@ get_new_connection_id_cb (ngtcp2_conn *conn __attribute__((unused)),
                           size_t cidlen,
 			  void *user_data __attribute__((unused)))
 {
-  int ret;
+    if (rand_bytes(cid->data, (int) cidlen) != 1)
+        return NGTCP2_ERR_CALLBACK_FAILURE;
 
-  ret = gnutls_rnd (GNUTLS_RND_RANDOM, cid->data, cidlen);
-  if (ret < 0)
-    return NGTCP2_ERR_CALLBACK_FAILURE;
+    cid->datalen = cidlen;
 
-  cid->datalen = cidlen;
+    if (rand_bytes(token, NGTCP2_STATELESS_RESET_TOKENLEN) != 1)
+        return NGTCP2_ERR_CALLBACK_FAILURE;
 
-  ret = gnutls_rnd (GNUTLS_RND_RANDOM, token, NGTCP2_STATELESS_RESET_TOKENLEN);
-  if (ret < 0)
-    return NGTCP2_ERR_CALLBACK_FAILURE;
-
-  return 0;
+    return 0;
 }
 
 static int
@@ -141,16 +147,16 @@ static int handshake_completed_cb(ngtcp2_conn *conn, void *user_data) {
 static const ngtcp2_callbacks callbacks =
   {
     /* Use the default implementation from ngtcp2_crypto */
-    .client_initial = ngtcp2_crypto_client_initial_cb,
-    .recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb,
-    .encrypt = ngtcp2_crypto_encrypt_cb,
-    .decrypt = ngtcp2_crypto_decrypt_cb,
-    .hp_mask = ngtcp2_crypto_hp_mask_cb,
-    .recv_retry = ngtcp2_crypto_recv_retry_cb,
-    .update_key = ngtcp2_crypto_update_key_cb,
-    .delete_crypto_aead_ctx = ngtcp2_crypto_delete_crypto_aead_ctx_cb,
-    .delete_crypto_cipher_ctx = ngtcp2_crypto_delete_crypto_cipher_ctx_cb,
-    .get_path_challenge_data = ngtcp2_crypto_get_path_challenge_data_cb,
+    .client_initial = client_initial,
+    .recv_crypto_data = recv_crypto_data_client,
+    .encrypt = null_encrypt,
+    .decrypt = null_decrypt,
+    .hp_mask = null_hp_mask,
+    .recv_retry = recv_retry,
+    .update_key = update_key,
+    .delete_crypto_aead_ctx = delete_crypto_aead_ctx,
+    .delete_crypto_cipher_ctx = delete_crypto_cipher_ctx,
+    .get_path_challenge_data = get_path_challenge_data,
 
     .acked_stream_data_offset = acked_stream_data_offset_cb,
     .recv_stream_data = recv_stream_data_cb,
@@ -398,21 +404,6 @@ main (int argc, char **argv)
   if (fd < 0)
     error (EXIT_FAILURE, errno, "resolve_and_connect failed\n");
 
-  /* Create a TLS client session */
-  __attribute__((cleanup(gnutls_certificate_free_credentialsp)))
-    gnutls_certificate_credentials_t cred = NULL;
-
-  cred = create_tls_client_credentials (argv[3]);
-  if (!cred)
-    error (EXIT_FAILURE, EINVAL, "create_tls_client_credentials failed\n");
-
-  __attribute__((cleanup(gnutls_deinitp))) gnutls_session_t session = NULL;
-
-  session = create_tls_client_session (cred);
-  if (!session)
-    error (EXIT_FAILURE, EINVAL, "create_tls_client_session failed\n");
-
-  gnutls_session_set_verify_cert (session, argv[1], 0);
 
   /* Create an ngtcp2 client connection */
   ngtcp2_path path =
@@ -449,7 +440,7 @@ main (int argc, char **argv)
 
   __attribute__((cleanup(connection_freep))) Connection *connection = NULL;
 
-  connection = connection_new (g_steal_pointer (&session), steal_fd (&fd));
+  connection = connection_new (NULL, steal_fd (&fd));
   if (!connection)
     error (EXIT_FAILURE, EINVAL, "connection_new failed\n");
 

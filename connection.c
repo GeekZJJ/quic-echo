@@ -4,7 +4,6 @@
 
 #include "connection.h"
 
-#include "gnutls-glue.h"
 #include <sys/timerfd.h>
 #include <unistd.h>
 #include "utils.h"
@@ -13,7 +12,6 @@
 
 struct _Connection
 {
-  gnutls_session_t session;
   ngtcp2_conn *conn;
   int socket_fd;
   int timer_fd;
@@ -64,7 +62,6 @@ connection_new (gnutls_session_t session,
   if (!connection)
     return NULL;
 
-  connection->session = session;
   connection->socket_fd = socket_fd;
   connection->timer_fd = -1;
 
@@ -86,8 +83,6 @@ connection_free (Connection *connection)
   ngtcp2_map_free(&connection->wait_map);
   ngtcp2_map_free(&connection->write_map);
 
-  if (connection->session)
-    gnutls_deinit (connection->session);
   if (connection->conn)
     ngtcp2_conn_del (connection->conn);
   if (connection->socket_fd >= 0)
@@ -184,10 +179,7 @@ connection_set_remote_addr (Connection *connection,
 int
 connection_start (Connection *connection)
 {
-  g_return_val_if_fail (connection->session, -1);
   g_return_val_if_fail (connection->conn, -1);
-
-  setup_gnutls_for_quic (connection->session, connection->conn);
 
   connection->timer_fd = timerfd_create (CLOCK_MONOTONIC, TFD_NONBLOCK);
   if (connection->timer_fd < 0)

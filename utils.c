@@ -179,18 +179,16 @@ send_packet (int fd, const uint8_t *data, size_t data_size,
   return ret;
 }
 
+int rand_bytes(uint8_t *data, size_t len);
+
 int
 get_random_cid (ngtcp2_cid *cid)
 {
-  uint8_t buf[NGTCP2_MAX_CIDLEN];
-  int ret;
+    uint8_t buf[NGTCP2_MAX_CIDLEN];
 
-  ret = gnutls_rnd (GNUTLS_RND_RANDOM, buf, sizeof(buf));
-  if (ret < 0)
-    {
-      g_message ("gnutls_rnd: %s\n", gnutls_strerror (ret));
-      return -1;
+    if (rand_bytes(buf, sizeof(buf)) < 0) {
+        return -1;
     }
-  ngtcp2_cid_init (cid, buf, sizeof(buf));
-  return 0;
+    ngtcp2_cid_init(cid, buf, sizeof(buf));
+    return 0;
 }
