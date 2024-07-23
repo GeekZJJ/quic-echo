@@ -1,18 +1,15 @@
 /* SPDX-License-Identifier: MIT */
 
 #include "config.h"
+#include "plaintext.h"
 
 #include "connection.h"
-#include "gnutls-glue.h"
 #include "utils.h"
 
 #include <errno.h>
 #include <error.h>
 #include <glib.h>
-#include <gnutls/crypto.h>
-#include <gnutls/gnutls.h>
 #include <ngtcp2/ngtcp2.h>
-#include <ngtcp2/ngtcp2_crypto.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
@@ -30,7 +27,6 @@ typedef struct _Server
   size_t local_addrlen;
   /* list of Connection; TODO: use a hash table */
   GList *connections;
-  gnutls_certificate_credentials_t cred;
   ngtcp2_settings settings;
   ngtcp2_cid scid;
 } Server;
@@ -42,20 +38,31 @@ server_deinit (Server *server)
     close (server->epoll_fd);
   if (server->socket_fd >= 0)
     close (server->socket_fd);
-  if (server->cred)
-    gnutls_certificate_free_credentials (server->cred);
   g_list_free_full (server->connections, (GDestroyNotify)connection_free);
+}
+
+int rand_bytes(uint8_t *data, size_t len)
+{
+    static int for_srand = 0;
+    if (!for_srand) {
+        srand(timestamp());
+        for_srand = 1;
+    }
+
+    for (size_t i = 0; i < len; ++i)
+        data[i] = (uint8_t)rand();
+
+    return 1;
 }
 
 static void
 rand_cb (uint8_t *dest, size_t destlen,
 	 const ngtcp2_rand_ctx *rand_ctx __attribute__((unused)))
 {
-  int ret;
-
-  ret = gnutls_rnd (GNUTLS_RND_RANDOM, dest, destlen);
-  if (ret < 0)
-    g_debug ("gnutls_rnd: %s\n", gnutls_strerror (ret));
+    size_t i;
+    for (i = 0; i < destlen; ++i) {
+        *dest = (uint8_t) random();
+    }
 }
 
 static int
@@ -64,19 +71,17 @@ get_new_connection_id_cb (ngtcp2_conn *conn __attribute__((unused)),
                           size_t cidlen,
 			  void *user_data __attribute__((unused)))
 {
-  int ret;
+    if (rand_bytes(cid->data, (int) cidlen) != 1) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
 
-  ret = gnutls_rnd (GNUTLS_RND_RANDOM, cid->data, cidlen);
-  if (ret < 0)
-    return NGTCP2_ERR_CALLBACK_FAILURE;
+    cid->datalen = cidlen;
 
-  cid->datalen = cidlen;
+    if (rand_bytes(token, NGTCP2_STATELESS_RESET_TOKENLEN) != 1) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
 
-  ret = gnutls_rnd (GNUTLS_RND_RANDOM, token, NGTCP2_STATELESS_RESET_TOKENLEN);
-  if (ret < 0)
-    return NGTCP2_ERR_CALLBACK_FAILURE;
-
-  return 0;
+    return 0;
 }
 
 static int
@@ -126,16 +131,16 @@ recv_stream_data_cb (ngtcp2_conn *conn __attribute__((unused)),
 static const ngtcp2_callbacks callbacks =
   {
     /* Use the default implementation from ngtcp2_crypto */
-    .recv_client_initial = ngtcp2_crypto_recv_client_initial_cb,
-    .recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb,
-    .encrypt = ngtcp2_crypto_encrypt_cb,
-    .decrypt = ngtcp2_crypto_decrypt_cb,
-    .hp_mask = ngtcp2_crypto_hp_mask_cb,
-    .recv_retry = ngtcp2_crypto_recv_retry_cb,
-    .update_key = ngtcp2_crypto_update_key_cb,
-    .delete_crypto_aead_ctx = ngtcp2_crypto_delete_crypto_aead_ctx_cb,
-    .delete_crypto_cipher_ctx = ngtcp2_crypto_delete_crypto_cipher_ctx_cb,
-    .get_path_challenge_data = ngtcp2_crypto_get_path_challenge_data_cb,
+    .recv_client_initial = recv_client_initial,
+    .recv_crypto_data = recv_crypto_data_server,
+    .encrypt = null_encrypt,
+    .decrypt = null_decrypt,
+    .hp_mask = null_hp_mask,
+    .recv_retry = recv_retry,
+    .update_key = update_key,
+    .delete_crypto_aead_ctx = delete_crypto_aead_ctx,
+    .delete_crypto_cipher_ctx = delete_crypto_cipher_ctx,
+    .get_path_challenge_data = get_path_challenge_data,
 
     .acked_stream_data_offset = acked_stream_data_offset_cb,
     .recv_stream_data = recv_stream_data_cb,
@@ -181,15 +186,11 @@ accept_connection (Server *server,
   if (ret < 0)
     return NULL;
 
-  __attribute__((cleanup(gnutls_deinitp))) gnutls_session_t session = NULL;
 
-  session = create_tls_server_session (server->cred);
-  if (!session)
-    return NULL;
 
   __attribute__((cleanup(connection_freep))) Connection *connection = NULL;
 
-  connection = connection_new (g_steal_pointer (&session), server->socket_fd);
+  connection = connection_new (NULL, server->socket_fd);
   if (!connection)
     return NULL;
 
@@ -439,7 +440,6 @@ main (int argc, char **argv)
   __attribute__((cleanup(server_deinit))) Server server =
     {
       .connections = NULL,
-      .cred = NULL,
       .local_addrlen = sizeof(struct sockaddr_storage),
       .epoll_fd = -1,
     };
@@ -474,15 +474,6 @@ main (int argc, char **argv)
   if (fd < 0)
     error (EXIT_FAILURE, errno, "resolve_and_bind");
   server.socket_fd = steal_fd (&fd);
-
-  /* Create a TLS server credentials */
-  __attribute__((cleanup(gnutls_certificate_free_credentialsp)))
-    gnutls_certificate_credentials_t cred = NULL;
-
-  cred = create_tls_server_credentials (argv[3], argv[4]);
-  if (!cred)
-    error (EXIT_FAILURE, EINVAL, "create_tls_credentials");
-  server.cred = g_steal_pointer (&cred);
 
   ngtcp2_settings_default (&server.settings);
   server.settings.initial_ts = timestamp ();
